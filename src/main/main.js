@@ -17,6 +17,7 @@ const { startWindowWatch } = require('./windows');
 const llm = require('./llm');
 const ollama = require('./ollama');
 const local = require('./local');
+const memory = require('./memory');
 const setup = require('./setup');
 const apps = require('./apps');
 const launch = require('./launch');
@@ -416,6 +417,13 @@ function rebuildTray() {
               ? { label: 'Capri local: download Qwen3-8B Q2_K (~3 GB)', click: downloadLocal }
               : { label: 'Capri local: model ready', enabled: false },
         ] : []),
+        {
+          label: 'Memory (~/.capri)',
+          submenu: [
+            { label: 'Open memory folder', click: () => { fs.mkdirSync(memory.dir(), { recursive: true }); shell.openPath(memory.dir()); } },
+            { label: 'Forget all long-term memories', click: () => memory.forget() },
+          ],
+        },
         { label: t.forget, click: forgetChats },
         // the key (or the address) of the one picked, pasted in her panel
         { label: t.apiKey, click: () => sendCommand('setupKey') },
@@ -609,6 +617,41 @@ async function chatWithFallback(cfg, messages, send, signal, streamed) {
   }
 }
 
+// Her long-term memory (memory.js, ~/.capri/memory): what bears on your message goes into her prompt, and
+// every few turns she keeps what's worth keeping from the chat, in the background.
+const lastText = (m) => (typeof m?.content === 'string' ? m.content : '');
+function recallInto(cfg, messages) {
+  try {
+    for (const text of cfg.memories || []) memory.add({ cat: 'preference', text }); // what you asked her to remember
+    const asked = new Set(cfg.memories || []); // those are already in her prompt (personal())
+    const user = lastText(messages.findLast((m) => m.role === 'user'));
+    const note = memory.prompt(user, asked);
+    if (!note || messages[0]?.role !== 'system') return messages;
+    return [{ ...messages[0], content: `${messages[0].content}\n\n${note}` }, ...messages.slice(1)];
+  } catch (err) {
+    console.error('[capri] memory recall failed:', err.message);
+    return messages;
+  }
+}
+
+let turns = 0;
+let learning = false;
+async function learnFrom(cfg, messages, answer) {
+  if (cfg.provider === 'claude' || learning || ++turns % 8) return; // Claude Code is the terminal agent: not for this
+  learning = true;
+  try {
+    const talk = [...messages.filter((m) => m.role !== 'system').slice(-10), { role: 'assistant', content: answer }]
+      .map((m) => `${m.role === 'user' ? 'USER' : 'CAPRI'}: ${lastText(m)}`).join('\n');
+    const raw = await chatWithFallback(cfg, [{ role: 'system', content: memory.EXTRACT }, { role: 'user', content: talk }],
+      () => {}, AbortSignal.timeout(120000), () => false);
+    memory.ingest(raw);
+  } catch (err) {
+    console.error('[capri] could not learn from the chat:', err.message); // never in the way of her answers
+  } finally {
+    learning = false;
+  }
+}
+
 // She looks at your screen (look.js): a picture of the screen she's on, kept here in memory a moment
 // for her AI to look at, never written anywhere. 1280 px wide at most: enough to read, light to send.
 const snaps = new Map(); // id -> the picture, base64 JPEG
@@ -763,8 +806,10 @@ function registerIpc() {
         overlay?.webContents.send('chat:delta', { id, text });
       };
       const cfg = config.load();
-      const text = await chatWithFallback(cfg, messages, send, abort.signal, () => streamed);
+      const withMemory = recallInto(cfg, messages);
+      const text = await chatWithFallback(cfg, withMemory, send, abort.signal, () => streamed);
       if (cfg.provider === 'claude') saveMemory({ claude: llm.claudeMemory() });
+      learnFrom(cfg, messages, text);
       return { ok: true, text };
     } catch (err) {
       return { ok: false, error: abort.signal.aborted ? 'stopped' : err.message, code: err.code || null };
