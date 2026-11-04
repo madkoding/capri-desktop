@@ -66,7 +66,7 @@ async function ensure(cfg) {
   if (await healthy()) return [NAME];
   if (!starting) {
     starting = (async () => {
-      const child = spawn(binary(cfg), ['-m', modelPath(), '--host', '127.0.0.1', '--port', String(PORT), '-c', '4096', '--jinja', '-ngl', String(cfg.localGpuLayers ?? 99)], {
+      const child = spawn(binary(cfg), ['-m', modelPath(), '--host', '127.0.0.1', '--port', String(PORT), '-c', String(cfg.localContext ?? 16384), '--jinja', '-ngl', String(cfg.localGpuLayers ?? 99)], {
         stdio: 'ignore', windowsHide: true,
       });
       let gone = null;

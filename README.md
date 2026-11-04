@@ -168,7 +168,7 @@ edit files without asking. **Forget our conversations** clears what she remember
 `Qwen3-8B-Q2_K.gguf` ([ISTA-DASLab/Qwen3-8B-GGUF-GSQ](https://huggingface.co/ISTA-DASLab/Qwen3-8B-GGUF-GSQ)), on your PC
 with llama.cpp: the same file `huggingface-cli download ISTA-DASLab/Qwen3-8B-GGUF-GSQ Qwen3-8B-Q2_K.gguf` fetches. The menu
 item **download** gets it (resumable) into her data folder; she then starts `llama-server` (on your PATH, or `llamaServer`
-in `config.json`) on `127.0.0.1:18080`, all layers on the GPU (`localGpuLayers`, 0 = CPU; needs a CUDA/Vulkan/Metal build of llama.cpp), thinking before it answers (`localThink: false` to skip), and stops it when you pick another AI or quit. Nothing leaves your PC.
+in `config.json`) on `127.0.0.1:18080`, all layers on the GPU (`localGpuLayers`, 0 = CPU; needs a CUDA/Vulkan/Metal build of llama.cpp), a 16K context (`localContext`; the model handles 32K, 128K with YaRN), thinking before it answers (`localThink: false` to skip), and stops it when you pick another AI or quit. Nothing leaves your PC.
 
 **It's AI.** Her replies are written by the model, not by the show's writers: it's a fan version of her, and the chat
 panel says so every time.
