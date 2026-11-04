@@ -98,7 +98,7 @@ function add({ text, cat = 'fact', tags = [], pinned = false }) {
 
 // The memories that bear on `query`, best first, within `budget` characters. Pinned ones come first.
 // Recalled ones count a hit, so what keeps being useful stays.
-function recall(query, { limit = 6, budget = 1200 } = {}) {
+function rank(query) {
   const docs = all();
   if (!docs.length) return [];
   const q = [...new Set(words(query))];
@@ -116,6 +116,16 @@ function recall(query, { limit = 6, budget = 1200 } = {}) {
     const age = (Date.now() - e.updated) / 864e5;
     return { e, score: bm * (WEIGHT[e.cat] || 1) * (1 + 0.15 * Math.log1p(e.hits)) * (0.5 + 0.5 * Math.exp(-age / 90)) };
   });
+  return scored;
+}
+
+// The best match for `query`, or null: no hit counted (used to forget a specific thing)
+function find(query) {
+  return rank(query).filter((s) => s.score > 0).sort((a, b) => b.score - a.score)[0]?.e || null;
+}
+
+function recall(query, { limit = 6, budget = 1200 } = {}) {
+  const scored = rank(query);
   const picked = [];
   let used = 0;
   const take = (e) => {
@@ -172,4 +182,4 @@ const EXTRACT = 'From this conversation, list only durable facts worth rememberi
   + 'projects, decisions). No small talk, nothing about you, nothing already obvious. Answer ONLY a JSON array like '
   + '[{"cat":"profile|preference|fact|project|episode","text":"short sentence","tags":["word"]}], or [] if nothing.';
 
-module.exports = { CATEGORIES, add, recall, forget, list, prompt, ingest, EXTRACT, dir, index };
+module.exports = { CATEGORIES, add, recall, find, forget, list, prompt, ingest, EXTRACT, dir, index };

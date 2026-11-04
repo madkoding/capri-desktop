@@ -8,18 +8,23 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { app } = require('electron');
+const os = require('node:os');
+
+// outside Electron (tests), the data folder is CAPRI_HOME's
+let app = null;
+try { ({ app } = require('electron')); } catch { /* not in Electron */ }
 
 const REPO = 'ISTA-DASLab/Qwen3-8B-GGUF-GSQ';
 const FILE = 'Qwen3-8B-Q2_K.gguf';
 const NAME = 'Qwen3-8B-Q2_K';
 const PORT = 18080;
+const PORT_NOW = () => Number(process.env.CAPRI_LLAMA_PORT) || PORT;
 const URL_BASE = `http://127.0.0.1:${PORT}`;
 
 let server = null;
 let starting = null;
 
-const dir = () => path.join(app.getPath('userData'), 'models');
+const dir = () => (app?.getPath ? path.join(app.getPath('userData'), 'models') : path.join(process.env.CAPRI_HOME || path.join(os.homedir(), '.capri'), 'models'));
 const modelPath = () => path.join(dir(), FILE);
 const downloaded = () => fs.existsSync(modelPath());
 const fail = (message, code) => Object.assign(new Error(message), { code });
@@ -29,7 +34,7 @@ async function download(onProgress, signal) {
   fs.mkdirSync(dir(), { recursive: true });
   const part = `${modelPath()}.part`;
   const have = fs.existsSync(part) ? fs.statSync(part).size : 0;
-  const res = await fetch(`https://huggingface.co/${REPO}/resolve/main/${FILE}`, {
+  const res = await fetch(`${(process.env.HF_ENDPOINT || 'https://huggingface.co').replace(/\/+$/, '')}/${REPO}/resolve/main/${FILE}`, {
     headers: have ? { range: `bytes=${have}-` } : {}, signal, redirect: 'follow',
   });
   if (!res.ok && res.status !== 206) throw fail(`Hugging Face answered ${res.status}`, 'download');
@@ -55,7 +60,7 @@ function binary(cfg) {
 }
 
 async function healthy() {
-  const res = await fetch(`${URL_BASE}/health`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
+  const res = await fetch(`http://127.0.0.1:${PORT_NOW()}/health`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
   return Boolean(res?.ok);
 }
 
@@ -66,7 +71,8 @@ async function ensure(cfg) {
   if (await healthy()) return [NAME];
   if (!starting) {
     starting = (async () => {
-      const child = spawn(binary(cfg), ['-m', modelPath(), '--host', '127.0.0.1', '--port', String(PORT), '-c', String(cfg.localContext ?? 16384), '--jinja', '-ngl', String(cfg.localGpuLayers ?? 99)], {
+      const child = spawn(binary(cfg), ['-m', modelPath(), '--host', '127.0.0.1', '--port', String(PORT_NOW()), '-c', String(cfg.localContext ?? 16384), '--jinja', '-ngl', String(cfg.localGpuLayers ?? 99),
+        ...(cfg.localCacheType ? ['--cache-type-k', cfg.localCacheType, '--cache-type-v', cfg.localCacheType] : [])], {
         stdio: 'ignore', windowsHide: true,
       });
       let gone = null;

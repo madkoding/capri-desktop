@@ -18,6 +18,7 @@ const llm = require('./llm');
 const ollama = require('./ollama');
 const local = require('./local');
 const memory = require('./memory');
+const memoryChat = require('./memory-chat');
 const setup = require('./setup');
 const apps = require('./apps');
 const launch = require('./launch');
@@ -73,6 +74,7 @@ function saveMemory(patch) {
 }
 function forgetChats() {
   llm.resetClaude();
+  summary = null;
   saveMemory({ history: [], claude: null });
   sendCommand('forget');
 }
@@ -412,16 +414,16 @@ function rebuildTray() {
         ] : []),
         ...(cfg.provider === 'capri' ? [
           localDownload
-            ? { label: `Capri local: downloading ${localDownload.pct}% (click to cancel)`, click: () => localDownload.abort.abort() }
+            ? { label: t.localDl(localDownload.pct), click: () => localDownload.abort.abort() }
             : !local.downloaded()
-              ? { label: 'Capri local: download Qwen3-8B Q2_K (~3 GB)', click: downloadLocal }
-              : { label: 'Capri local: model ready', enabled: false },
+              ? { label: t.localGet, click: downloadLocal }
+              : { label: t.localReady, enabled: false },
         ] : []),
         {
-          label: 'Memory (~/.capri)',
+          label: t.memMenu,
           submenu: [
-            { label: 'Open memory folder', click: () => { fs.mkdirSync(memory.dir(), { recursive: true }); shell.openPath(memory.dir()); } },
-            { label: 'Forget all long-term memories', click: () => memory.forget() },
+            { label: t.memOpen, click: () => { fs.mkdirSync(memory.dir(), { recursive: true }); shell.openPath(memory.dir()); } },
+            { label: t.memForget, click: () => memory.forget() },
           ],
         },
         { label: t.forget, click: forgetChats },
@@ -634,6 +636,41 @@ function recallInto(cfg, messages) {
   }
 }
 
+// Auto-compaction (her local model): before the chat reaches 75% of its context, the older messages become
+// a short summary (kept as an `episode` memory too) and only the last few stay word for word.
+const tokensOf = (list) => Math.ceil(list.reduce((n, m) => n + lastText(m).length, 0) / 3.5);
+let summary = null; // { upTo: the last message it covers, text }
+async function compact(cfg, messages, signal) {
+  if (cfg.provider !== 'capri' || messages[0]?.role !== 'system') return messages;
+  const limit = Math.floor((cfg.localContext ?? 16384) * 0.75) - 1500; // the answer needs room too
+  const [system, ...rest] = messages;
+  let body = rest;
+  if (summary) {
+    const at = body.findLastIndex((m) => lastText(m) === summary.upTo);
+    if (at >= 0) body = body.slice(at + 1); else summary = null;
+  }
+  const build = (b) => [summary ? { ...system, content: `${system.content}\n\nSummary of the earlier conversation: ${summary.text}` } : system, ...b];
+  if (tokensOf(build(body)) <= limit || body.length <= 6) return build(body);
+  const old = body.slice(0, -6);
+  try {
+    const talk = [summary && `EARLIER SUMMARY: ${summary.text}`, ...old.map((m) => `${m.role === 'user' ? 'USER' : 'CAPRI'}: ${lastText(m)}`)].filter(Boolean).join('\n');
+    const raw = await chatWithFallback(cfg, [
+      { role: 'system', content: 'Summarize this conversation in under 150 words, plain text: names, decisions, open tasks, what the user cares about.' },
+      { role: 'user', content: talk },
+    ], () => {}, signal, () => false);
+    if (raw.trim().length < 20) throw new Error('empty summary');
+    summary = { upTo: lastText(old.at(-1)), text: raw.trim() };
+    memory.add({ cat: 'episode', text: summary.text.slice(0, 500) });
+    return build(body.slice(-6));
+  } catch (err) {
+    if (signal.aborted) throw err;
+    console.error('[capri] could not summarize the chat:', err.message);
+    let kept = body; // last resort: the oldest messages go
+    while (kept.length > 2 && tokensOf(build(kept)) > limit) kept = kept.slice(1);
+    return build(kept);
+  }
+}
+
 let turns = 0;
 let learning = false;
 async function learnFrom(cfg, messages, answer) {
@@ -806,7 +843,13 @@ function registerIpc() {
         overlay?.webContents.send('chat:delta', { id, text });
       };
       const cfg = config.load();
-      const withMemory = recallInto(cfg, messages);
+      // asked about her memory ("what do you remember about me?"): answered from the files
+      const direct = memoryChat.answer(lastText(messages.findLast((m) => m.role === 'user')), resolveLang(cfg.lang));
+      if (direct) {
+        send(direct);
+        return { ok: true, text: direct };
+      }
+      const withMemory = recallInto(cfg, await compact(cfg, messages, abort.signal));
       const text = await chatWithFallback(cfg, withMemory, send, abort.signal, () => streamed);
       if (cfg.provider === 'claude') saveMemory({ claude: llm.claudeMemory() });
       learnFrom(cfg, messages, text);

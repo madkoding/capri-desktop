@@ -34,3 +34,13 @@ test('ingest takes a model answer, ignores junk, forget removes', () => {
   assert.ok(memory.forget() >= 1);
   assert.equal(memory.list().length, 0);
 });
+
+test('chat can list and forget memories without a model', () => {
+  const { answer } = require('../src/main/memory-chat');
+  assert.match(answer('¿Qué recuerdas de mí?', 'es'), /Aún no recuerdo/);
+  memory.add({ cat: 'preference', text: 'Le gusta el café sin azúcar' });
+  assert.match(answer('que recuerdas de mi', 'es'), /café sin azúcar/);
+  assert.equal(answer('olvida que le gusta el café', 'es').startsWith('Olvidado'), true);
+  assert.equal(memory.list().length, 0);
+  assert.equal(answer('hola, ¿cómo estás?', 'es'), null);
+});
