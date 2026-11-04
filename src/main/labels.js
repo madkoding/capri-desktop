@@ -25,7 +25,7 @@ const TRAY = {
     pcReact: 'Réagir à mon PC',
     cloudFree: 'gratuit, en ligne', cloudSignin: 'Me connecter à Ollama (modèles cloud gratuits)…',
     memMenu: 'Mémoire (~/.capri)', memOpen: 'Ouvrir le dossier de la mémoire', memForget: 'Oublier toute la mémoire longue',
-    localDl: p => `Capri local : téléchargement ${p} % (clic pour annuler)`, localGet: 'Capri local : télécharger Qwen3-8B Q2_K (~3 Go)', localReady: 'Capri local : modèle prêt',
+    localDl: p => `Capri local : téléchargement ${p} % (clic pour annuler)`, localGet: 'Capri local : télécharger Qwen3-8B Q2_K + embeddings (~4 Go)', localReady: 'Capri local : modèle prêt',
   },
   en: {
     name: 'English',
@@ -48,7 +48,7 @@ const TRAY = {
     pcReact: 'React to my PC',
     cloudFree: 'free, online', cloudSignin: 'Sign in to Ollama (free cloud models)…',
     memMenu: 'Memory (~/.capri)', memOpen: 'Open memory folder', memForget: 'Forget all long-term memories',
-    localDl: p => `Capri local: downloading ${p}% (click to cancel)`, localGet: 'Capri local: download Qwen3-8B Q2_K (~3 GB)', localReady: 'Capri local: model ready',
+    localDl: p => `Capri local: downloading ${p}% (click to cancel)`, localGet: 'Capri local: download Qwen3-8B Q2_K + embeddings (~4 GB)', localReady: 'Capri local: model ready',
   },
   es: {
     name: 'Español',
@@ -71,7 +71,7 @@ const TRAY = {
     pcReact: 'Reaccionar a mi PC',
     cloudFree: 'gratis, en línea', cloudSignin: 'Conectarme a Ollama (modelos en la nube gratis)…',
     memMenu: 'Memoria (~/.capri)', memOpen: 'Abrir la carpeta de memoria', memForget: 'Olvidar toda la memoria a largo plazo',
-    localDl: p => `Capri local: descargando ${p} % (clic para cancelar)`, localGet: 'Capri local: descargar Qwen3-8B Q2_K (~3 GB)', localReady: 'Capri local: modelo listo',
+    localDl: p => `Capri local: descargando ${p} % (clic para cancelar)`, localGet: 'Capri local: descargar Qwen3-8B Q2_K + embeddings (~4 GB)', localReady: 'Capri local: modelo listo',
   },
   pt: {
     name: 'Português (Brasil)',
@@ -94,7 +94,7 @@ const TRAY = {
     pcReact: 'Reagir ao meu PC',
     cloudFree: 'grátis, online', cloudSignin: 'Entrar no Ollama (modelos na nuvem grátis)…',
     memMenu: 'Memória (~/.capri)', memOpen: 'Abrir a pasta da memória', memForget: 'Esquecer toda a memória de longo prazo',
-    localDl: p => `Capri local: baixando ${p}% (clique para cancelar)`, localGet: 'Capri local: baixar Qwen3-8B Q2_K (~3 GB)', localReady: 'Capri local: modelo pronto',
+    localDl: p => `Capri local: baixando ${p}% (clique para cancelar)`, localGet: 'Capri local: baixar Qwen3-8B Q2_K + embeddings (~4 GB)', localReady: 'Capri local: modelo pronto',
   },
   ru: {
     name: 'Русский',
@@ -117,7 +117,7 @@ const TRAY = {
     pcReact: 'Реагировать на мой ПК',
     cloudFree: 'бесплатно, онлайн', cloudSignin: 'Войти в Ollama (бесплатные облачные модели)…',
     memMenu: 'Память (~/.capri)', memOpen: 'Открыть папку памяти', memForget: 'Забыть всю долгую память',
-    localDl: p => `Capri local: загрузка ${p} % (клик — отмена)`, localGet: 'Capri local: скачать Qwen3-8B Q2_K (~3 ГБ)', localReady: 'Capri local: модель готова',
+    localDl: p => `Capri local: загрузка ${p} % (клик — отмена)`, localGet: 'Capri local: скачать Qwen3-8B Q2_K + embeddings (~4 ГБ)', localReady: 'Capri local: модель готова',
   },
 };
 

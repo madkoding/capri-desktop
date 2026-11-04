@@ -53,7 +53,11 @@ test('meaning-based recall finds a memory that shares no words with the question
   memory.forget();
   ['Has a red coche', 'Owns a gato named Tom', 'Loves pizza', 'Plays guitar', 'Fixes a bug daily', 'Lives near the beach']
     .forEach((text) => memory.add({ cat: 'fact', text }));
+  embedder.id = 'toy';
   await memory.embedPending(embedder);
+  const other = Object.assign(embedder, { id: 'other' }); // vectors from another model are not mixed in
+  assert.equal(await memory.promptWith('which auto do I drive', other), '');
+  embedder.id = 'toy';
   const found = await memory.promptWith('which auto do I drive', embedder);
   assert.match(found, /red coche/);
   assert.doesNotMatch(found, /pizza/);

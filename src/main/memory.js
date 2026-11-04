@@ -186,11 +186,11 @@ async function embedPending(embedder) {
     const entries = all();
     const vecs = loadVecs();
     for (const id of Object.keys(vecs)) if (!entries.some((e) => e.id === id)) delete vecs[id];
-    const todo = entries.filter((e) => !vecs[e.id] || vecs[e.id].t !== e.updated);
+    const todo = entries.filter((e) => !vecs[e.id] || vecs[e.id].t !== e.updated || vecs[e.id].m !== (embedder.id || '')); // new, edited, or made by another model
     for (let i = 0; i < todo.length; i += 16) {
       const batch = todo.slice(i, i + 16);
       const out = await embedder(batch.map((e) => e.text));
-      batch.forEach((e, j) => { if (out[j]?.length) vecs[e.id] = { ...pack(out[j]), t: e.updated }; });
+      batch.forEach((e, j) => { if (out[j]?.length) vecs[e.id] = { ...pack(out[j]), t: e.updated, m: embedder.id || '' }; });
     }
     fs.mkdirSync(dir(), { recursive: true });
     fs.writeFileSync(vecFile(), JSON.stringify(vecs));
@@ -202,9 +202,9 @@ async function embedPending(embedder) {
 // all look alike): Map id -> cosine. null when there's too little to compare.
 async function semantic(query, embedder) {
   const vecs = loadVecs();
-  const ids = Object.keys(vecs);
+  const ids = Object.keys(vecs).filter((id) => vecs[id].m === (embedder.id || ''));
   if (ids.length < 5) return null;
-  const [q] = await embedder([query]);
+  const [q] = await embedder([query], { query: true });
   if (!q?.length) return null;
   const list = ids.map((id) => unpack(vecs[id]));
   if (list.some((v) => v.length !== q.length)) return null; // another model made them: ignored

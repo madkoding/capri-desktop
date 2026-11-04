@@ -415,7 +415,7 @@ function rebuildTray() {
         ...(cfg.provider === 'capri' ? [
           localDownload
             ? { label: t.localDl(localDownload.pct), click: () => localDownload.abort.abort() }
-            : !local.downloaded()
+            : !local.complete()
               ? { label: t.localGet, click: downloadLocal }
               : { label: t.localReady, enabled: false },
         ] : []),
@@ -624,7 +624,13 @@ async function chatWithFallback(cfg, messages, send, signal, streamed) {
 const lastText = (m) => (typeof m?.content === 'string' ? m.content : '');
 // Meaning-based recall (embeddings from her local model's own llama-server): only with Capri local,
 // unless `localEmbeddings` is false; on any failure recall is by words only.
-const embedder = (cfg) => (cfg.provider === 'capri' && cfg.localEmbeddings !== false ? (texts) => local.embed(cfg, texts) : null);
+const QUERY_HOW = 'Instruct: Given a message from the user, retrieve the memories relevant to it\nQuery: '; // Qwen3-Embedding's query form
+function embedder(cfg) {
+  if (cfg.provider !== 'capri' || cfg.localEmbeddings === false) return null;
+  const embed = (texts, { query } = {}) => local.embed(cfg, query ? texts.map((t) => QUERY_HOW + t) : texts);
+  embed.id = local.EMBED_NAME;
+  return embed;
+}
 async function recallInto(cfg, messages) {
   try {
     for (const text of cfg.memories || []) memory.add({ cat: 'preference', text }); // what you asked her to remember
@@ -748,8 +754,8 @@ async function downloadLocal() {
   localDownload = { pct: 0, abort };
   rebuildTray();
   try {
-    await local.download((done, total) => {
-      const pct = total ? Math.floor((done / total) * 100) : 0;
+    await local.download((fraction) => {
+      const pct = Math.floor(fraction * 100);
       if (pct !== localDownload.pct) { localDownload.pct = pct; rebuildTray(); }
     }, abort.signal);
   } catch (err) {

@@ -10,7 +10,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'capri-local-'));
 process.env.CAPRI_HOME = tmp;
 const BODY = Buffer.alloc(300000, 7);
 
-test('downloads from the Hugging Face endpoint and resumes a partial file', async () => {
+test('downloads from the Hugging Face endpoint and resumes a partial file, both models', async () => {
   const server = http.createServer((req, res) => {
     const range = /bytes=(\d+)-/.exec(req.headers.range || '');
     const from = range ? Number(range[1]) : 0;
@@ -24,11 +24,11 @@ test('downloads from the Hugging Face endpoint and resumes a partial file', asyn
   fs.writeFileSync(`${local.modelPath()}.part`, BODY.subarray(0, 100000)); // an interrupted download
   assert.equal(local.downloaded(), false);
   let last = 0;
-  await local.download((done) => { last = done; });
+  await local.download((fraction) => { last = fraction; });
   server.close();
-  assert.equal(last, BODY.length);
+  assert.equal(Math.round(last * 100), 100);
   assert.equal(fs.statSync(local.modelPath()).size, BODY.length);
-  assert.ok(local.downloaded());
+  assert.ok(local.downloaded() && local.complete()); // the chat model and the embedding one
 });
 
 test('ensure starts llama-server with the GPU/context flags and stops it', async () => {
@@ -77,8 +77,9 @@ require('http').createServer((q, r) => {
   assert.deepEqual(out, [[3, 1], [1, 1]]); // the fake answers with its own indexes: sorted by them
   const args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
   assert.ok(args.includes('--embeddings'));
-  assert.equal(args[args.indexOf('--pooling') + 1], 'mean');
+  assert.equal(args[args.indexOf('--pooling') + 1], 'last');
+  assert.match(args[args.indexOf('-m') + 1], /Qwen3-Embedding-0\.6B/);
   assert.equal(args[args.indexOf('--port') + 1], '18991');
-  assert.equal(args[args.indexOf('-ngl') + 1], '0');
+  assert.equal(args[args.indexOf('-ngl') + 1], '99');
   local.stop();
 });
