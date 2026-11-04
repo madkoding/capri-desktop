@@ -1,0 +1,85 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'capri-local-'));
+process.env.CAPRI_HOME = tmp;
+const BODY = Buffer.alloc(300000, 7);
+
+test('downloads from the Hugging Face endpoint and resumes a partial file, both models', async () => {
+  const server = http.createServer((req, res) => {
+    const range = /bytes=(\d+)-/.exec(req.headers.range || '');
+    const from = range ? Number(range[1]) : 0;
+    res.writeHead(range ? 206 : 200, { 'content-length': BODY.length - from });
+    res.end(BODY.subarray(from));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  process.env.HF_ENDPOINT = `http://127.0.0.1:${server.address().port}`;
+  const local = require('../src/main/local');
+  fs.mkdirSync(path.dirname(local.modelPath()), { recursive: true });
+  fs.writeFileSync(`${local.modelPath()}.part`, BODY.subarray(0, 100000)); // an interrupted download
+  assert.equal(local.downloaded(), false);
+  let last = 0;
+  await local.download((fraction) => { last = fraction; });
+  server.close();
+  assert.equal(Math.round(last * 100), 100);
+  assert.equal(fs.statSync(local.modelPath()).size, BODY.length);
+  assert.ok(local.downloaded() && local.complete()); // the chat model and the embedding one
+});
+
+test('ensure starts llama-server with the GPU/context flags and stops it', async () => {
+  const local = require('../src/main/local');
+  const argsFile = path.join(tmp, 'args.json');
+  const fake = path.join(tmp, 'llama-server');
+  fs.writeFileSync(fake, `#!/usr/bin/env node
+require('fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
+require('http').createServer((q, r) => r.end('ok')).listen(port, '127.0.0.1');
+`, { mode: 0o755 });
+  process.env.CAPRI_LLAMA_PORT = '18999';
+  const names = await local.ensure({ llamaServer: fake, localContext: 16384, localCacheType: 'q8_0' });
+  assert.deepEqual(names, [local.NAME]);
+  const args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+  assert.equal(args[args.indexOf('-ngl') + 1], '99');
+  assert.equal(args[args.indexOf('-c') + 1], '16384');
+  assert.equal(args[args.indexOf('--cache-type-k') + 1], 'q8_0');
+  local.stop();
+});
+
+test('ensure explains a missing llama-server', async () => {
+  const local = require('../src/main/local');
+  process.env.CAPRI_LLAMA_PORT = '18998';
+  await assert.rejects(local.ensure({ llamaServer: path.join(tmp, 'nope') }), { code: 'nobin' });
+});
+
+test('embed starts its own llama-server in embeddings mode and returns vectors in order', async () => {
+  const local = require('../src/main/local');
+  const argsFile = path.join(tmp, 'embed-args.json');
+  const fake = path.join(tmp, 'llama-embed');
+  fs.writeFileSync(fake, `#!/usr/bin/env node
+require('fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
+require('http').createServer((q, r) => {
+  if (q.url === '/health') return r.end('ok');
+  let b = ''; q.on('data', (c) => { b += c; }).on('end', () => {
+    const input = JSON.parse(b).input;
+    r.setHeader('content-type', 'application/json');
+    r.end(JSON.stringify({ data: input.map((t, i) => ({ index: input.length - 1 - i, embedding: [t.length, 1] })).reverse() }));
+  });
+}).listen(port, '127.0.0.1');
+`, { mode: 0o755 });
+  process.env.CAPRI_LLAMA_PORT = '18990';
+  const out = await local.embed({ llamaServer: fake }, ['a', 'bbb']);
+  assert.deepEqual(out, [[3, 1], [1, 1]]); // the fake answers with its own indexes: sorted by them
+  const args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+  assert.ok(args.includes('--embeddings'));
+  assert.equal(args[args.indexOf('--pooling') + 1], 'last');
+  assert.match(args[args.indexOf('-m') + 1], /Qwen3-Embedding-0\.6B/);
+  assert.equal(args[args.indexOf('--port') + 1], '18991');
+  assert.equal(args[args.indexOf('-ngl') + 1], '99');
+  local.stop();
+});

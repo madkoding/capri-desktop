@@ -10,6 +10,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { spawn, execFile } = require('node:child_process');
 const ollama = require('./ollama');
+const local = require('./local');
 
 const PROVIDERS = {
   ollama: { label: 'Ollama (local)', kind: 'ollama', local: true },
@@ -24,6 +25,7 @@ const PROVIDERS = {
   gemini: { label: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai', env: 'GEMINI_API_KEY' },
   deepseek: { label: 'DeepSeek', url: 'https://api.deepseek.com/v1', env: 'DEEPSEEK_API_KEY' },
   mistral: { label: 'Mistral', url: 'https://api.mistral.ai/v1', env: 'MISTRAL_API_KEY' },
+  capri: { label: 'Capri local (Qwen3-8B Q2_K, manual)', kind: 'capri', url: `${local.URL_BASE}/v1`, local: true },
   custom: { label: 'Custom (customUrl in config)' },
   claude: { label: 'Claude Code (sends to the terminal agent)', kind: 'claude' },
 };
@@ -72,6 +74,7 @@ async function models(id, cfg) {
   const p = endpoint(id, cfg);
   if (p.kind === 'ollama') return ollama.models().catch(() => null);
   if (p.kind === 'claude') return claudeVersion().then(() => ['Claude Code']);
+  if (p.kind === 'capri') return local.ensure(cfg);
   // what's missing has a code, so her setup knows what to ask for (setup.js)
   if (!p.url) throw Object.assign(new Error('no address set for this server'), { code: 'nourl' });
   if (p.env && !p.key) throw Object.assign(new Error(`no API key (or ${p.env})`), { code: 'nokey' });
@@ -88,11 +91,11 @@ function warm(id, model) {
 }
 
 // OpenAI-style streaming (server-sent events): onDelta(piece) as it comes, resolves with all of it.
-async function openaiChat(p, { model, messages }, onDelta, signal) {
+async function openaiChat(p, { model, messages }, onDelta, signal, extra = {}) {
   const res = await fetch(`${p.url}/chat/completions`, {
     method: 'POST',
     headers: headers(p.key),
-    body: JSON.stringify({ model, messages, stream: true }),
+    body: JSON.stringify({ model, messages, stream: true, ...extra }),
     signal,
   });
   if (!res.ok) throw await failure(res);
@@ -212,7 +215,10 @@ async function chat(id, cfg, { model, messages }, onDelta, signal) {
   if (p.kind === 'ollama') return ollama.chat({ model, messages }, onDelta, signal);
   // Claude Code keeps its own memory of the conversation: only her persona and your last message go
   if (p.kind === 'claude') return claudeChat(cfg, messages.at(-1).content, messages[0].content, onDelta, signal);
-  return openaiChat(p, { model, messages }, onDelta, signal);
+  // Qwen3 thinks first (on the GPU that's fast; hidden from the bubble). `localThink: false` in config.json skips it.
+  const think = cfg.localThink !== false;
+  const extra = p.kind === 'capri' ? { chat_template_kwargs: { enable_thinking: think }, max_tokens: think ? 1500 : 400 } : {};
+  return openaiChat(p, { model, messages }, onDelta, signal, extra);
 }
 
 // Whether her answers stay on this PC: a server on this machine (and with Ollama, not a cloud model).
