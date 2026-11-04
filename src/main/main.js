@@ -16,6 +16,7 @@ const { createBridge } = require('./bridge');
 const { startWindowWatch } = require('./windows');
 const llm = require('./llm');
 const ollama = require('./ollama');
+const local = require('./local');
 const setup = require('./setup');
 const apps = require('./apps');
 const launch = require('./launch');
@@ -45,6 +46,7 @@ let windowWatch = null;
 let lastWindows = null;
 let chatModels = null; // the provider's models, as last seen (null: not reached)
 let chatError = null;  // why not, when the provider said
+let localDownload = null; // { pct, abort } while her local model downloads
 let chatErrorCode = null; // 'nokey' or 'nourl': what her setup should ask for
 // Ollama's cloud, as last seen: your account ({ name } or { signin }) and the models free with it
 let cloud = { at: 0, account: null, free: [] };
@@ -407,6 +409,13 @@ function rebuildTray() {
             })),
           },
         ] : []),
+        ...(cfg.provider === 'capri' ? [
+          localDownload
+            ? { label: `Capri local: downloading ${localDownload.pct}% (click to cancel)`, click: () => localDownload.abort.abort() }
+            : !local.downloaded()
+              ? { label: 'Capri local: download Qwen3-8B Q2_K (~3 GB)', click: downloadLocal }
+              : { label: 'Capri local: model ready', enabled: false },
+        ] : []),
         { label: t.forget, click: forgetChats },
         // the key (or the address) of the one picked, pasted in her panel
         { label: t.apiKey, click: () => sendCommand('setupKey') },
@@ -525,6 +534,7 @@ async function refreshModels() {
   const cfg = config.load();
   chatError = null;
   chatErrorCode = null;
+  if (cfg.provider !== 'capri') local.stop(); // her own server only runs while she's picked
   chatModels = await llm.models(cfg.provider, llmConfig(cfg)).catch((err) => {
     chatError = err.message;
     chatErrorCode = err.code || null;
@@ -646,10 +656,28 @@ async function sayAboutSnap({ id, persona, prompt, history = [] }) {
   }
 }
 
+// Her local model, fetched only when you ask from the menu.
+async function downloadLocal() {
+  if (localDownload) return;
+  const abort = new AbortController();
+  localDownload = { pct: 0, abort };
+  rebuildTray();
+  try {
+    await local.download((done, total) => {
+      const pct = total ? Math.floor((done / total) * 100) : 0;
+      if (pct !== localDownload.pct) { localDownload.pct = pct; rebuildTray(); }
+    }, abort.signal);
+  } catch (err) {
+    if (!abort.signal.aborted) console.error('[capri] local model download failed:', err.message);
+  }
+  localDownload = null;
+  await refreshModels();
+}
+
 async function pickProvider(provider) {
   updateConfig({ provider });
   await refreshModels();
-  if (chatErrorCode) sendCommand('setupKey'); // it needs a key or an address: she asks for it
+  if (chatErrorCode === 'nokey' || chatErrorCode === 'nourl') sendCommand('setupKey'); // it needs a key or an address: she asks for it
 }
 
 // What llm.js gets: the config with its keys opened (they're kept encrypted, setup.js)
@@ -1069,6 +1097,7 @@ function main() {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     windowWatch?.stop();
+    local.stop();
   });
   app.on('window-all-closed', (e) => e.preventDefault());
 }

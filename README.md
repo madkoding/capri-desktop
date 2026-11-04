@@ -164,6 +164,12 @@ itself: your messages go to `claude -p` in the folder you pick, continuing one c
 does. In that last one, permission mode `default` only lets it read (nobody is there to say yes); `acceptEdits` lets it
 edit files without asking. **Forget our conversations** clears what she remembers of your chats.
 
+**Capri local (manual).** Off unless you pick it in her menu › **AI model** › *Capri local*. It runs one model,
+`Qwen3-8B-Q2_K.gguf` ([ISTA-DASLab/Qwen3-8B-GGUF-GSQ](https://huggingface.co/ISTA-DASLab/Qwen3-8B-GGUF-GSQ)), on your PC
+with llama.cpp: the same file `huggingface-cli download ISTA-DASLab/Qwen3-8B-GGUF-GSQ Qwen3-8B-Q2_K.gguf` fetches. The menu
+item **download** gets it (resumable) into her data folder; she then starts `llama-server` (on your PATH, or `llamaServer`
+in `config.json`) on `127.0.0.1:18080` and stops it when you pick another AI or quit. Nothing leaves your PC.
+
 **It's AI.** Her replies are written by the model, not by the show's writers: it's a fan version of her, and the chat
 panel says so every time.
 
