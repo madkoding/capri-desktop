@@ -21,9 +21,6 @@ const PORT = 18080;
 const PORT_NOW = () => Number(process.env.CAPRI_LLAMA_PORT) || PORT;
 const URL_BASE = `http://127.0.0.1:${PORT}`;
 
-let server = null;
-let starting = null;
-
 const dir = () => (app?.getPath ? path.join(app.getPath('userData'), 'models') : path.join(process.env.CAPRI_HOME || path.join(os.homedir(), '.capri'), 'models'));
 const modelPath = () => path.join(dir(), FILE);
 const downloaded = () => fs.existsSync(modelPath());
@@ -59,42 +56,75 @@ function binary(cfg) {
   return cfg.llamaServer || process.env.LLAMA_SERVER || 'llama-server';
 }
 
-async function healthy() {
-  const res = await fetch(`http://127.0.0.1:${PORT_NOW()}/health`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
+// Two llama-servers can run on the model: `chat` (port P) and `embed` (P+1). Embeddings get their own
+// instance because a server started with --embeddings serves only embeddings, not chat completions.
+const slots = {
+  chat: { child: null, starting: null, port: () => PORT_NOW() },
+  embed: { child: null, starting: null, port: () => PORT_NOW() + 1 },
+};
+
+async function healthy(slot) {
+  const res = await fetch(`http://127.0.0.1:${slot.port()}/health`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
   return Boolean(res?.ok);
 }
 
-// llama-server up on the model (starts it when needed). Throws with a code: 'nolocal' (not downloaded),
+function argsFor(kind, cfg) {
+  const base = ['-m', modelPath(), '--host', '127.0.0.1'];
+  if (kind === 'embed') {
+    // CPU by default (localEmbedGpuLayers): the model's weights are already on the GPU for chat
+    return [...base, '--port', String(slots.embed.port()), '-c', '2048', '--embeddings', '--pooling', 'mean', '-ngl', String(cfg.localEmbedGpuLayers ?? 0)];
+  }
+  return [...base, '--port', String(slots.chat.port()), '-c', String(cfg.localContext ?? 16384), '--jinja', '-ngl', String(cfg.localGpuLayers ?? 99),
+    ...(cfg.localCacheType ? ['--cache-type-k', cfg.localCacheType, '--cache-type-v', cfg.localCacheType] : [])];
+}
+
+// Starts (when needed) and waits for one llama-server. Throws with a code: 'nolocal' (not downloaded),
 // 'nobin' (llama-server not found), 'start' (it didn't come up).
-async function ensure(cfg) {
+async function boot(kind, cfg) {
+  const slot = slots[kind];
   if (!downloaded()) throw fail('Capri local: model not downloaded yet (AI model menu → Download)', 'nolocal');
-  if (await healthy()) return [NAME];
-  if (!starting) {
-    starting = (async () => {
-      const child = spawn(binary(cfg), ['-m', modelPath(), '--host', '127.0.0.1', '--port', String(PORT_NOW()), '-c', String(cfg.localContext ?? 16384), '--jinja', '-ngl', String(cfg.localGpuLayers ?? 99),
-        ...(cfg.localCacheType ? ['--cache-type-k', cfg.localCacheType, '--cache-type-v', cfg.localCacheType] : [])], {
-        stdio: 'ignore', windowsHide: true,
-      });
+  if (await healthy(slot)) return;
+  if (!slot.starting) {
+    slot.starting = (async () => {
+      const child = spawn(binary(cfg), argsFor(kind, cfg), { stdio: 'ignore', windowsHide: true });
       let gone = null;
       child.on('error', (err) => { gone = err.code === 'ENOENT' ? fail('llama-server not found: install llama.cpp or set llamaServer in config.json', 'nobin') : err; });
-      child.on('exit', () => { if (server === child) server = null; gone ||= fail('llama-server stopped', 'start'); });
-      server = child;
+      child.on('exit', () => { if (slot.child === child) slot.child = null; gone ||= fail('llama-server stopped', 'start'); });
+      slot.child = child;
       for (let i = 0; i < 120 && !gone; i++) {
-        if (await healthy()) return;
+        if (await healthy(slot)) return;
         await new Promise((r) => setTimeout(r, 1000));
       }
-      stop();
+      slot.child?.kill();
+      slot.child = null;
       throw gone || fail('llama-server took too long to start', 'start');
-    })().finally(() => { starting = null; });
+    })().finally(() => { slot.starting = null; });
   }
-  await starting;
+  await slot.starting;
+}
+
+async function ensure(cfg) {
+  await boot('chat', cfg);
   return [NAME];
 }
 
-function stop() {
-  const child = server;
-  server = null;
-  child?.kill();
+// Vectors for some texts (from the embeddings instance, started on first use): [[number]]
+async function embed(cfg, texts) {
+  await boot('embed', cfg);
+  const res = await fetch(`http://127.0.0.1:${slots.embed.port()}/v1/embeddings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input: texts }), signal: AbortSignal.timeout(60000),
+  });
+  if (!res.ok) throw fail(`embeddings answered ${res.status}`, 'embed');
+  const { data = [] } = await res.json();
+  return data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
 }
 
-module.exports = { NAME, URL_BASE, downloaded, download, ensure, stop, modelPath };
+function stop() {
+  for (const slot of Object.values(slots)) {
+    const child = slot.child;
+    slot.child = null;
+    child?.kill();
+  }
+}
+
+module.exports = { NAME, URL_BASE, downloaded, download, ensure, embed, stop, modelPath };

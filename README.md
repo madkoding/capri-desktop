@@ -174,7 +174,8 @@ in `config.json`) on `127.0.0.1:18080`, all layers on the GPU (`localGpuLayers`,
 `.jsonl` per category (`profile`, `preference`, `fact`, `project`, `episode`) plus a readable `MEMORY.md` you can edit or
 delete from. Every 8 turns, in the background, her AI picks out the durable facts about you from the chat. Before each
 answer, only what bears on your message (local keyword search, nothing sent anywhere to find it) goes into her prompt;
-what you asked her to remember is kept there too. Ask her "what do you remember about me?" to see it, or "forget that I like coffee" to drop one (answered from the files, no model).
+what you asked her to remember is kept there too. With Capri local, finding a memory also goes by meaning, not only words ("which car do I drive?" finds "has a red coche"): a second `llama-server` on the same model runs with `--embeddings --pooling mean` (port +1, on the CPU by default: `localEmbedGpuLayers`; `localEmbeddings: false` turns it off), and the vectors are kept as int8 in `vectors.json`. If it's slow or down, she searches by words.
+Ask her "what do you remember about me?" to see it, or "forget that I like coffee" to drop one (answered from the files, no model).
 With Capri local, when the chat nears 75% of the context, the older messages become a short summary (also kept as an `episode`) and only the last few stay word for word. Her menu › **AI model** › **Memory** opens the folder or forgets it all.
 
 **It's AI.** Her replies are written by the model, not by the show's writers: it's a fan version of her, and the chat

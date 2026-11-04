@@ -622,12 +622,15 @@ async function chatWithFallback(cfg, messages, send, signal, streamed) {
 // Her long-term memory (memory.js, ~/.capri/memory): what bears on your message goes into her prompt, and
 // every few turns she keeps what's worth keeping from the chat, in the background.
 const lastText = (m) => (typeof m?.content === 'string' ? m.content : '');
-function recallInto(cfg, messages) {
+// Meaning-based recall (embeddings from her local model's own llama-server): only with Capri local,
+// unless `localEmbeddings` is false; on any failure recall is by words only.
+const embedder = (cfg) => (cfg.provider === 'capri' && cfg.localEmbeddings !== false ? (texts) => local.embed(cfg, texts) : null);
+async function recallInto(cfg, messages) {
   try {
     for (const text of cfg.memories || []) memory.add({ cat: 'preference', text }); // what you asked her to remember
     const asked = new Set(cfg.memories || []); // those are already in her prompt (personal())
     const user = lastText(messages.findLast((m) => m.role === 'user'));
-    const note = memory.prompt(user, asked);
+    const note = await memory.promptWith(user, embedder(cfg), asked);
     if (!note || messages[0]?.role !== 'system') return messages;
     return [{ ...messages[0], content: `${messages[0].content}\n\n${note}` }, ...messages.slice(1)];
   } catch (err) {
@@ -682,6 +685,8 @@ async function learnFrom(cfg, messages, answer) {
     const raw = await chatWithFallback(cfg, [{ role: 'system', content: memory.EXTRACT }, { role: 'user', content: talk }],
       () => {}, AbortSignal.timeout(120000), () => false);
     memory.ingest(raw);
+    const embed = embedder(cfg);
+    if (embed) await memory.embedPending(embed);
   } catch (err) {
     console.error('[capri] could not learn from the chat:', err.message); // never in the way of her answers
   } finally {
@@ -849,7 +854,7 @@ function registerIpc() {
         send(direct);
         return { ok: true, text: direct };
       }
-      const withMemory = recallInto(cfg, await compact(cfg, messages, abort.signal));
+      const withMemory = await recallInto(cfg, await compact(cfg, messages, abort.signal));
       const text = await chatWithFallback(cfg, withMemory, send, abort.signal, () => streamed);
       if (cfg.provider === 'claude') saveMemory({ claude: llm.claudeMemory() });
       learnFrom(cfg, messages, text);

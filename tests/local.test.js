@@ -55,3 +55,30 @@ test('ensure explains a missing llama-server', async () => {
   process.env.CAPRI_LLAMA_PORT = '18998';
   await assert.rejects(local.ensure({ llamaServer: path.join(tmp, 'nope') }), { code: 'nobin' });
 });
+
+test('embed starts its own llama-server in embeddings mode and returns vectors in order', async () => {
+  const local = require('../src/main/local');
+  const argsFile = path.join(tmp, 'embed-args.json');
+  const fake = path.join(tmp, 'llama-embed');
+  fs.writeFileSync(fake, `#!/usr/bin/env node
+require('fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
+require('http').createServer((q, r) => {
+  if (q.url === '/health') return r.end('ok');
+  let b = ''; q.on('data', (c) => { b += c; }).on('end', () => {
+    const input = JSON.parse(b).input;
+    r.setHeader('content-type', 'application/json');
+    r.end(JSON.stringify({ data: input.map((t, i) => ({ index: input.length - 1 - i, embedding: [t.length, 1] })).reverse() }));
+  });
+}).listen(port, '127.0.0.1');
+`, { mode: 0o755 });
+  process.env.CAPRI_LLAMA_PORT = '18990';
+  const out = await local.embed({ llamaServer: fake }, ['a', 'bbb']);
+  assert.deepEqual(out, [[3, 1], [1, 1]]); // the fake answers with its own indexes: sorted by them
+  const args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+  assert.ok(args.includes('--embeddings'));
+  assert.equal(args[args.indexOf('--pooling') + 1], 'mean');
+  assert.equal(args[args.indexOf('--port') + 1], '18991');
+  assert.equal(args[args.indexOf('-ngl') + 1], '0');
+  local.stop();
+});

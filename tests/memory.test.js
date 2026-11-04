@@ -44,3 +44,20 @@ test('chat can list and forget memories without a model', () => {
   assert.equal(memory.list().length, 0);
   assert.equal(answer('hola, ¿cómo estás?', 'es'), null);
 });
+
+test('meaning-based recall finds a memory that shares no words with the question', async () => {
+  // a toy embedder: "car"/"coche"/"auto" are the same direction, "cat"/"gato" another, plus a little noise per text
+  const concepts = [['car', 'coche', 'auto', 'drive', 'conduce'], ['cat', 'gato', 'pet'], ['pizza', 'food'], ['music', 'guitar'], ['code', 'bug'], ['sea', 'beach']];
+  const embedder = async (texts) => texts.map((t) => concepts.map((c) => (c.some((w) => t.toLowerCase().includes(w)) ? 1 : 0.05))
+    .concat([t.length % 7 / 100]));
+  memory.forget();
+  ['Has a red coche', 'Owns a gato named Tom', 'Loves pizza', 'Plays guitar', 'Fixes a bug daily', 'Lives near the beach']
+    .forEach((text) => memory.add({ cat: 'fact', text }));
+  await memory.embedPending(embedder);
+  const found = await memory.promptWith('which auto do I drive', embedder);
+  assert.match(found, /red coche/);
+  assert.doesNotMatch(found, /pizza/);
+  const words = await memory.promptWith('which auto do I drive', null); // no embedder: words only, finds nothing
+  assert.equal(words, '');
+  memory.forget();
+});
